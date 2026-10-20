@@ -49,7 +49,16 @@ and stored in the Keychain; the tool warns on `X-GitHub-SSO` if the org needs au
 
 ## Claude Code skill
 
-`skills/git-vault/SKILL.md` teaches Claude Code to use vaults (raw `git-vault run ... --vault X`, vault selection, agent limits). Install:
+`skills/git-vault/SKILL.md` teaches Claude Code to use vaults (raw `git-vault run ... --vault X`, vault selection, agent limits).
+
+Install with [`npx skills`](https://github.com/vercel-labs/skills) (no clone needed):
+
+```bash
+npx skills add chungquantin/git-vault          # into the current project
+npx skills add chungquantin/git-vault -g       # global, all projects
+```
+
+Or link it manually from a clone:
 
 ```bash
 mkdir -p ~/.claude/skills && ln -sfn "$PWD/skills/git-vault" ~/.claude/skills/git-vault
