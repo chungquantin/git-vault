@@ -104,3 +104,7 @@ Limits: one HTTPS host per vault; token briefly visible in `ps` during `security
 2. `packaging/update-formula.sh vX.Y.Z` pins `packaging/homebrew/git-vault.rb` to that tag.
 3. Copy the formula to `Formula/git-vault.rb` in a `chungquantin/homebrew-tap` repo and push.
    Until a release exists, `brew install --HEAD chungquantin/tap/git-vault` tracks `main`.
+
+## Author
+
+GitHub: [chungquantin](https://github.com/chungquantin)

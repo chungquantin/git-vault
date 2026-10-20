@@ -41,9 +41,13 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
 .block button { all: unset; cursor: pointer; font: 13px var(--mono); color: var(--dim); padding: 2px 4px; border-radius: 4px; }
 .block button:hover, .block button:focus-visible { color: var(--tx); outline: 1px solid var(--line); }
 .block pre { padding-right: 90px; }
-.c { color: var(--dim); }
-.k { color: #7cb7ff; }
-.s { color: #a9d58b; }
+.t-cmt { color: #7d7a72; font-style: italic; }
+.t-cmd { color: #7cb7ff; }
+.t-flag { color: #d6a4ff; }
+.t-str { color: #a9d58b; }
+.t-var { color: #f0b86e; }
+.t-op { color: #ff8f8f; }
+.t-url { color: #6fd6d0; }
 
 .note { color: var(--dim); font-size: 16px; }
 footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--dim); font-size: 15px; }
@@ -58,14 +62,14 @@ footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line);
 
   <p>Work, personal, a client: different emails, tokens and SSH keys, but git has one global config. <code>git-vault</code> injects a named identity (author, HTTPS token, SSH key, signing key) into a single git command. Nothing is written to your git config.</p>
 
-  <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre><span class="k">git</span> commit <span class="s">--vault</span> work -m <span class="s">"fix: typo"</span>
-<span class="k">git</span> push   <span class="s">--vault</span> personal</pre></div>
+  <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre>git commit --vault work -m "fix: typo"
+git push   --vault personal</pre></div>
 
   <h2 id="install">Install</h2>
-  <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre><span class="c"># Homebrew</span>
+  <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre># Homebrew
 brew install chungquantin/tap/git-vault
 
-<span class="c"># or curl</span>
+# or curl
 curl -fsSL https://raw.githubusercontent.com/chungquantin/git-vault/main/install.sh | sh</pre></div>
 
   <p>Then enable the shell function and check the setup:</p>
@@ -76,7 +80,7 @@ git-vault doctor</pre></div>
   <h2 id="use">Use</h2>
   <p>One vault per account. Each does its own browser sign-in:</p>
   <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre>git add vault --name personal --user-name "Me" --email me@gmail.com --no-token
-git vault login --name personal    <span class="c"># browser opens: sign in as that account</span>
+git vault login --name personal    # browser opens: sign in as that account
 
 git add vault --name work --user-name "Me" --email me@corp.com --ssh-key ~/.ssh/id_work --no-token
 
@@ -87,9 +91,9 @@ git push   --vault work</pre></div>
   <p>Manage vaults:</p>
   <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre>git vault list
 git vault show work
-git vault set --name work --email new@corp.com   <span class="c"># edit fields, token untouched</span>
+git vault set --name work --email new@corp.com   # edit fields, token untouched
 git vault remove work
-GIT_VAULT=work git pull                          <span class="c"># env alternative</span></pre></div>
+GIT_VAULT=work git pull                          # env alternative</pre></div>
 
   <h2>How it works</h2>
   <p>For the one command only, git-vault passes:</p>
@@ -105,10 +109,40 @@ GIT_VAULT=work git pull                          <span class="c"># env alternati
   <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre>npx skills add chungquantin/git-vault -g</pre></div>
 
   <footer>
-    <a href="https://github.com/chungquantin/git-vault">Source</a> · <a href="https://github.com/chungquantin/git-vault/issues">Issues</a>
+    <div>Author · GitHub: <a href="https://github.com/chungquantin">chungquantin</a></div>
+    <div><a href="https://github.com/chungquantin/git-vault">Source</a> · <a href="https://github.com/chungquantin/git-vault/issues">Issues</a></div>
   </footer>
 </main>
 <script>
+/* tiny bash highlighter: comments, strings, flags, env/vars, operators, urls/paths, commands */
+(() => {
+  const TOKEN = /(?<cmt>(?:^|(?<=\s))#.*$)|(?<str>"[^"]*"|'[^']*')|(?<op>&&|>>|\||>)|(?<var>\$\{[^}]*\}|\$\w+|\b[A-Z][A-Z0-9_]*(?==))|(?<flag>(?<=\s|^)--?[A-Za-z][\w-]*)|(?<url>https?:\/\/[^\s"']+|~?\/[\w.\/~-]+|~\/[\w.\/-]*)|(?<word>[^\s"'&|>$#]+)|(?<sp>\s+)|(?<other>.)/gy;
+  const span = (cls, text) => { const e = document.createElement("span"); e.className = cls; e.textContent = text; return e; };
+  function highlightLine(line) {
+    const frag = document.createDocumentFragment();
+    let expectCmd = true;
+    TOKEN.lastIndex = 0;
+    let m;
+    while (TOKEN.lastIndex < line.length && (m = TOKEN.exec(line))) {
+      const g = m.groups, t = m[0];
+      if (g.cmt) frag.append(span("t-cmt", t));
+      else if (g.str) { frag.append(span("t-str", t)); expectCmd = false; }
+      else if (g.op) { frag.append(span("t-op", t)); expectCmd = t === "&&" || t === "|"; }
+      else if (g.var) frag.append(span("t-var", t));
+      else if (g.flag) { frag.append(span("t-flag", t)); expectCmd = false; }
+      else if (g.url) { frag.append(span("t-url", t)); expectCmd = false; }
+      else if (g.word) { if (expectCmd) { frag.append(span("t-cmd", t)); expectCmd = false; } else frag.append(t); }
+      else frag.append(t);
+    }
+    return frag;
+  }
+  document.querySelectorAll(".block pre").forEach((pre) => {
+    const lines = pre.textContent.split("\n");
+    pre.textContent = "";
+    lines.forEach((l, i) => { pre.append(highlightLine(l)); if (i < lines.length - 1) pre.append("\n"); });
+  });
+})();
+
 document.querySelectorAll(".block button[data-copy]").forEach((b) => {
   b.addEventListener("click", async () => {
     const text = b.closest(".block").querySelector("pre").innerText;
