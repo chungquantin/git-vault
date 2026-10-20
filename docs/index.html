@@ -75,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/chungquantin/git-vault/main/install
   <p>Then enable the shell function and check the setup:</p>
   <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre>echo 'eval "$(git-vault shell-init)"' &gt;&gt; ~/.zshrc &amp;&amp; source ~/.zshrc
 git-vault doctor</pre></div>
-  <p class="note">Needs Python 3.8+ and git. The shell function is what makes <code>git add vault</code> and <code>--vault</code> work; <code>git vault &lt;cmd&gt;</code> works without it.</p>
+  <p class="note">A single Rust binary (macOS and Linux). The shell function is what makes <code>git add vault</code> and <code>--vault</code> work; <code>git vault &lt;cmd&gt;</code> works without it.</p>
 
   <h2 id="use">Use</h2>
   <p>One vault per account. Each does its own browser sign-in:</p>
@@ -95,6 +95,29 @@ git vault set --name work --email new@corp.com   # edit fields, token untouched
 git vault remove work
 GIT_VAULT=work git pull                          # env alternative</pre></div>
 
+  <h2>Rules, no <code>--vault</code> needed</h2>
+  <p>Route repos to vaults by URL, then install the credential helper once. Plain <code>git push</code> picks the right account.</p>
+  <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre>git vault rule add 'github.com/corp/*' --vault work
+git vault rule add 'github.com' --vault personal
+git vault install-helper
+
+cd ~/code/side-project &amp;&amp; git vault use personal   # or pin one repo</pre></div>
+
+  <h2>Hosts and rotation</h2>
+  <p>GitHub (and Enterprise), GitLab, Gitea / Forgejo / Codeberg and Bitbucket. Sign in through the browser, or paste a token.</p>
+  <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre>git vault login  --name work
+git vault rotate --name work       # new token stored first, then the old one revoked
+git vault import gh --apply        # vaults from accounts gh already knows
+git vault import ssh --apply       # vaults from ~/.ssh/config</pre></div>
+
+  <h2>Backends</h2>
+  <p>Pick where tokens live with <code>--backend</code> or <code>GIT_VAULT_BACKEND</code>: <code>keychain</code> (macOS), <code>libsecret</code> (Linux), <code>pass</code>, <code>op</code> (1Password) or <code>file</code> (age-encrypted).</p>
+
+  <h2>Signing and inheritance</h2>
+  <div class="block"><div class="bar"><span>bash</span><button data-copy>copy</button></div><pre>git vault add --name work ... --ssh-key ~/.ssh/id_work --sign     # SSH-signed commits
+git vault add --name work-ro --extends work --no-token            # inherits from work
+git vault set --name work --confirm dialog                        # ask before releasing the token</pre></div>
+
   <h2>How it works</h2>
   <p>For the one command only, git-vault passes:</p>
   <ul>
@@ -102,7 +125,7 @@ GIT_VAULT=work git pull                          # env alternative</pre></div>
     <li>A credential helper for HTTPS that answers only for the vault's host, so a work token never goes to the wrong server.</li>
     <li><code>GIT_SSH_COMMAND="ssh -i KEY -o IdentitiesOnly=yes"</code> for SSH remotes.</li>
   </ul>
-  <p>Tokens are stored in the macOS Keychain (a <code>0600</code> file elsewhere). <code>git vault login</code> uses <code>gh auth login --web</code> in a throwaway config dir, so SSO sign-in happens in the browser and your own <code>gh</code> accounts are untouched.</p>
+  <p>Tokens live in your chosen backend, fetched only at the moment git asks. <code>git vault login</code> signs in through the browser (SSO included); for GitHub it runs <code>gh auth login --web</code> in a throwaway config dir, so your own <code>gh</code> accounts are untouched.</p>
 
   <h2 id="skill">Claude skill</h2>
   <p>Let Claude Code commit and push as the right account:</p>

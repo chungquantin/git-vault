@@ -19,7 +19,7 @@ git-vault run push --vault personal -u origin main
 git-vault run clone --vault work git@github.com:org/repo.git
 ```
 
-`--vault` may go anywhere before a `--`. `GIT_VAULT=<name>` is an alternative. If the binary is missing, call `~/Developer/git-vault/git-vault` or run `./install.sh`.
+`--vault` may go anywhere before a `--`. `GIT_VAULT=<name>` is an alternative. If the binary is missing, run `./install.sh` from the repo (builds with cargo) or `brew install chungquantin/tap/git-vault`.
 
 ## Pick the vault
 
@@ -30,21 +30,30 @@ git-vault run clone --vault work git@github.com:org/repo.git
 ## Manage vaults
 
 ```bash
-git-vault add --name N --user-name "Name" --email e@x.com [--host H] [--ssh-key PATH] [--signing-key ID] [--no-token]
-git-vault login --name N            # browser sign-in (via gh, throwaway config); --from-gh [--gh-user U]; --client-id ID
-git-vault set --name N --ssh-key PATH --email ...   # edit fields, token untouched
+git-vault add --name N --user-name "Name" --email e@x.com [--host H --provider github|gitlab|gitea|bitbucket] [--ssh-key PATH] [--sign] [--extends PARENT] [--confirm none|terminal|dialog|touchid] [--no-token]
+git-vault login --name N            # browser sign-in; --method device|gh|gh-import|token|password
+git-vault rotate --name N           # new token stored first, then old one revoked
+git-vault set --name N --email ...  # edit fields, token untouched
 git-vault list | show N | remove N
+git-vault rule add 'github.com/corp/*' --vault N     # URL rules for the credential helper
+git-vault use N                     # pin the current repo to a vault (writes local git config)
+git-vault install-helper            # plain `git push` picks a vault by rule/use
+git-vault exec N -- <cmd>           # run any tool with the vault's token + identity in env
+git-vault import gh|ssh [--apply]   # create vaults from gh accounts / ~/.ssh/config
+git-vault doctor
 ```
 
 - One vault = one account on one host. Token and SSH key must belong to the same account as the vault's email.
 - HTTPS remotes use the token. `git@` remotes use `--ssh-key`; a vault without one cannot push over SSH.
+- `--backend keychain|file|pass|op|libsecret` selects where tokens live.
 - Do not use `add --force` just to edit a field; use `set`.
 
 ## Agent limits and safety
 
 - Passphrase-protected SSH keys cannot be unlocked from the agent (no TTY, empty ssh-agent). If a push fails with `Permission denied (publickey)`, commit locally and hand the user the exact command to run in their terminal; suggest `ssh-add --apple-use-keychain <key>`.
 - Browser `login` needs the user; do not attempt it unattended.
-- Never print, log or commit tokens or private keys. Do not read `~/.config/git-vault/secrets` or Keychain entries.
+- A vault with `confirm` set prompts the human before releasing a token; if it is denied or no terminal exists, stop and tell the user.
+- Never print, log or commit tokens or private keys. Do not read `~/.config/git-vault/` secrets or Keychain entries. `git-vault exec` puts the token in the child's environment; do not echo it.
 - Pushing is outward-facing: only push when the user asked, to the remote they named.
 
 ## Troubleshooting

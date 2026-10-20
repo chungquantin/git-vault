@@ -2,14 +2,13 @@
 # git-vault installer.
 #   curl -fsSL https://raw.githubusercontent.com/chungquantin/git-vault/main/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- --shell      # also add shell integration to your rc file
-#   ./install.sh                                      # from a clone: symlinks (dev mode)
-# Env: PREFIX (default ~/.local/bin), GIT_VAULT_VERSION (tag/branch, default main),
-#      GIT_VAULT_BASE_URL (override download base, e.g. file:///path/to/clone)
+#   ./install.sh                                      # from a clone: builds with cargo and symlinks
+# Env: PREFIX (default ~/.local/bin), GIT_VAULT_VERSION (tag like v0.2.0, default latest release),
+#      GIT_VAULT_BASE_URL (override the release download base, for mirrors/tests)
+# Order: prebuilt release binary -> `cargo install` from source if no release matches.
 set -eu
 
 REPO="chungquantin/git-vault"
-REF="${GIT_VAULT_VERSION:-main}"
-BASE="${GIT_VAULT_BASE_URL:-https://raw.githubusercontent.com/$REPO/$REF}"
 DEST="${PREFIX:-$HOME/.local/bin}"
 EVAL_LINE='eval "$(git-vault shell-init)"'
 
@@ -26,42 +25,90 @@ done
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
 
 if [ "$UNINSTALL" = 1 ]; then
   rm -f "$DEST/git-vault"
   say "removed $DEST/git-vault"
   say "remove this line from your shell rc if present: $EVAL_LINE"
-  say "vault data stays in \${GIT_VAULT_HOME:-~/.config/git-vault} and the Keychain (service git-vault)"
+  say "vault data stays in \${GIT_VAULT_HOME:-~/.config/git-vault} and your secret backend (service git-vault)"
   exit 0
 fi
 
-command -v git >/dev/null 2>&1 || die "git not found"
-command -v python3 >/dev/null 2>&1 || die "python3 not found (macOS: xcode-select --install)"
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 8))' || die "python >= 3.8 required"
-
+have git || die "git not found"
 mkdir -p "$DEST"
 
-# Dev mode: executed as a real file from a clone -> symlink.
+target() {
+  os="$(uname -s)"; arch="$(uname -m)"
+  case "$os/$arch" in
+    Darwin/arm64) echo aarch64-apple-darwin ;;
+    Darwin/x86_64) echo x86_64-apple-darwin ;;
+    Linux/x86_64|Linux/amd64) echo x86_64-unknown-linux-musl ;;
+    Linux/aarch64|Linux/arm64) echo aarch64-unknown-linux-musl ;;
+    *) echo "" ;;
+  esac
+}
+
+sha256_of() {
+  if have shasum; then shasum -a 256 "$1" | cut -d' ' -f1
+  elif have sha256sum; then sha256sum "$1" | cut -d' ' -f1
+  else echo ""; fi
+}
+
+MODE=""
+
+# 1. Dev mode: executed as a real file from a clone -> build + symlink.
 case "$0" in
   */install.sh|install.sh)
     here="$(cd "$(dirname "$0")" && pwd)"
-    if [ -f "$here/git-vault" ]; then
-      chmod +x "$here/git-vault"
-      ln -sf "$here/git-vault" "$DEST/git-vault"
-      say "linked $DEST/git-vault -> $here/git-vault"
+    if [ -f "$here/Cargo.toml" ]; then
+      have cargo || die "cargo not found (install Rust: https://rustup.rs)"
+      say "building from $here"
+      (cd "$here" && cargo build --release --locked 2>&1 | tail -n 3)
+      ln -sf "$here/target/release/git-vault" "$DEST/git-vault"
+      say "linked $DEST/git-vault -> $here/target/release/git-vault"
       MODE=linked
     fi
     ;;
 esac
 
-if [ "${MODE:-}" != linked ]; then
-  command -v curl >/dev/null 2>&1 || die "curl not found"
-  tmp="$(mktemp)"
-  trap 'rm -f "$tmp"' EXIT
-  say "downloading $BASE/git-vault"
-  curl -fsSL "$BASE/git-vault" -o "$tmp" || die "download failed"
-  head -n 1 "$tmp" | grep -q python || die "downloaded file does not look like git-vault"
-  install -m 755 "$tmp" "$DEST/git-vault"
+# 2. Prebuilt release binary.
+if [ -z "$MODE" ]; then
+  T="$(target)"
+  if [ -n "$T" ] && have curl && have tar; then
+    if [ -n "${GIT_VAULT_BASE_URL:-}" ]; then
+      BASE="$GIT_VAULT_BASE_URL"
+    elif [ -n "${GIT_VAULT_VERSION:-}" ]; then
+      BASE="https://github.com/$REPO/releases/download/$GIT_VAULT_VERSION"
+    else
+      BASE="https://github.com/$REPO/releases/latest/download"
+    fi
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    say "downloading $BASE/git-vault-$T.tar.gz"
+    if curl -fsSL "$BASE/git-vault-$T.tar.gz" -o "$tmp/gv.tar.gz" && curl -fsSL "$BASE/git-vault-$T.tar.gz.sha256" -o "$tmp/gv.sha256"; then
+      want="$(cut -d' ' -f1 < "$tmp/gv.sha256")"
+      got="$(sha256_of "$tmp/gv.tar.gz")"
+      [ -n "$got" ] || die "no shasum/sha256sum available to verify the download"
+      [ "$want" = "$got" ] || die "checksum mismatch (expected $want, got $got)"
+      tar -xzf "$tmp/gv.tar.gz" -C "$tmp" git-vault
+      install -m 755 "$tmp/git-vault" "$DEST/git-vault"
+      say "installed $DEST/git-vault (checksum verified)"
+      MODE=binary
+    else
+      say "no prebuilt binary for $T at $BASE"
+    fi
+  fi
+fi
+
+# 3. Source build fallback.
+if [ -z "$MODE" ]; then
+  have cargo || die "no prebuilt binary and cargo not found. Install Rust (https://rustup.rs) or Homebrew (brew install chungquantin/tap/git-vault)"
+  say "building from source with cargo (a few minutes)"
+  root="$(mktemp -d)"
+  cargo install --git "https://github.com/$REPO" --locked --root "$root" git-vault 2>&1 | tail -n 3
+  install -m 755 "$root/bin/git-vault" "$DEST/git-vault"
+  rm -rf "$root"
   say "installed $DEST/git-vault"
 fi
 

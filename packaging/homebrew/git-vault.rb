@@ -3,10 +3,13 @@ class GitVault < Formula
   homepage "https://github.com/chungquantin/git-vault"
   head "https://github.com/chungquantin/git-vault.git", branch: "main"
 
-  depends_on "python"
+  depends_on "rust" => :build
 
   def install
-    bin.install "git-vault"
+    system "cargo", "install", *std_cargo_args
+    (bash_completion/"git-vault").write Utils.safe_popen_read(bin/"git-vault", "completions", "bash")
+    (zsh_completion/"_git-vault").write Utils.safe_popen_read(bin/"git-vault", "completions", "zsh")
+    (fish_completion/"git-vault.fish").write Utils.safe_popen_read(bin/"git-vault", "completions", "fish")
   end
 
   def caveats
