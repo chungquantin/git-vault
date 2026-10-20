@@ -1,6 +1,8 @@
 class GitVault < Formula
   desc "Manage multiple git identities and credentials per command, aws-vault style"
   homepage "https://github.com/chungquantin/git-vault"
+  url "https://github.com/chungquantin/git-vault/archive/refs/tags/v0.2.0.tar.gz"
+  sha256 "08baec16425dc2f3f5bb816c3d1f95cf3cbbcc87d981ca6bdef921dc30cb6495"
   head "https://github.com/chungquantin/git-vault.git", branch: "main"
 
   depends_on "rust" => :build
