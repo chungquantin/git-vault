@@ -5,9 +5,25 @@ Multiple git identities + credentials, selected per command, `aws-vault` style.
 ## Install
 
 ```bash
+# Homebrew (needs the tap, see "Releasing" below)
+brew install chungquantin/tap/git-vault
+
+# curl (add `sh -s -- --shell` to also wire your shell rc)
+curl -fsSL https://raw.githubusercontent.com/chungquantin/git-vault/main/install.sh | sh
+
+# from a clone (symlinks, handy for development)
 ./install.sh
-echo 'eval "$(git-vault shell-init)"' >> ~/.zshrc
 ```
+
+Then enable the shell function and check the setup:
+
+```bash
+echo 'eval "$(git-vault shell-init)"' >> ~/.zshrc && source ~/.zshrc
+git-vault doctor
+```
+
+Needs Python 3.8+ and git. `PREFIX=` changes the install dir (default `~/.local/bin`),
+`GIT_VAULT_VERSION=v0.1.0` pins a tag, `install.sh --uninstall` removes it.
 
 ## Use
 
@@ -76,3 +92,15 @@ Tokens live in macOS Keychain (service `git-vault`); elsewhere `0600` files unde
 Metadata: `~/.config/git-vault/vaults.json`. Override dir with `GIT_VAULT_HOME`, force file backend with `GIT_VAULT_BACKEND=file`.
 
 Limits: one HTTPS host per vault; token briefly visible in `ps` during `security add-generic-password`.
+
+## Landing page
+
+`docs/index.html` is a static page with an interactive demo terminal. Preview locally with
+`open docs/index.html`; to host it, enable GitHub Pages (Settings, Pages, source `main` / `/docs`).
+
+## Releasing
+
+1. Bump `VERSION` in `git-vault`, commit, tag `vX.Y.Z`, push the tag.
+2. `packaging/update-formula.sh vX.Y.Z` pins `packaging/homebrew/git-vault.rb` to that tag.
+3. Copy the formula to `Formula/git-vault.rb` in a `chungquantin/homebrew-tap` repo and push.
+   Until a release exists, `brew install --HEAD chungquantin/tap/git-vault` tracks `main`.

@@ -27,10 +27,12 @@ from pathlib import Path
 
 HOME = Path(os.environ.get("GIT_VAULT_HOME", Path.home() / ".config" / "git-vault"))
 DB = HOME / "vaults.json"
+VERSION = "0.1.0"
 SERVICE = "git-vault"
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 SHELL_INIT = r'''# git-vault shell integration
+export GIT_VAULT_SHELL=1
 git() {
   if [ "$1" = add ] && [ "$2" = vault ]; then
     shift 2
@@ -375,6 +377,28 @@ def cmd_run(argv):
     os.execvpe("git", ["git", *cfg, *rest], env)
 
 
+def cmd_doctor(_a):
+    bad = 0
+
+    def row(ok, label, hint=""):
+        nonlocal bad
+        mark = "ok  " if ok else "FAIL"
+        bad += not ok
+        print(f"[{mark}] {label}" + (f"  -> {hint}" if hint and not ok else ""))
+
+    row(sys.version_info >= (3, 8), f"python {platform.python_version()}", "need python >= 3.8")
+    g = shutil.which("git")
+    row(bool(g), f"git ({g})" if g else "git", "install git")
+    row(bool(shutil.which("git-vault")), "git-vault on PATH", "add its directory to PATH")
+    row(os.environ.get("GIT_VAULT_SHELL") == "1", "shell integration loaded",
+        'add: eval "$(git-vault shell-init)" to ~/.zshrc, then restart the shell')
+    s = Secrets()
+    row(not s.keychain or bool(shutil.which("security")), f"secret backend: {'keychain' if s.keychain else 'file'}")
+    print(f"[info] gh {'found' if shutil.which('gh') else 'missing (needed for `login`; or use --client-id)'}")
+    print(f"[info] {len(load_db())} vault(s) in {DB}")
+    sys.exit(1 if bad else 0)
+
+
 def cmd_shell_init(_a):
     print(SHELL_INIT, end="")
 
@@ -383,6 +407,10 @@ def main():
     argv = sys.argv[1:]
     if argv and argv[0] == "run":  # raw passthrough, no argparse
         cmd_run(argv[1:])
+        return
+
+    if argv and argv[0] in ("--version", "-V", "version"):
+        print(f"git-vault {VERSION}")
         return
 
     p = argparse.ArgumentParser(prog="git-vault", description=__doc__.split("\n")[0])
@@ -430,6 +458,7 @@ def main():
     s.add_argument("--vault", required=True)
     s.add_argument("op", nargs="?", default="get")
     s.set_defaults(fn=cmd_credential)
+    sub.add_parser("doctor", help="check install and shell integration").set_defaults(fn=cmd_doctor)
     sub.add_parser("shell-init", help="print shell function enabling `git ... --vault X`").set_defaults(fn=cmd_shell_init)
     sub.add_parser("run", help="git-vault run <git args> [--vault X]")
 
