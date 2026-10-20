@@ -47,6 +47,14 @@ and stored in the Keychain; the tool warns on `X-GitHub-SSO` if the org needs au
 `git add vault` and `--vault` need the shell function from `shell-init`
 (git can't be extended with new flags natively). `git vault <cmd>` works without it.
 
+## Claude Code skill
+
+`skills/git-vault/SKILL.md` teaches Claude Code to use vaults (raw `git-vault run ... --vault X`, vault selection, agent limits). Install:
+
+```bash
+mkdir -p ~/.claude/skills && ln -sfn "$PWD/skills/git-vault" ~/.claude/skills/git-vault
+```
+
 ## How it works
 
 Per invocation only, nothing written to git config:
