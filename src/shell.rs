@@ -1,4 +1,4 @@
-use crate::config::{Config, HelperState};
+use crate::config::{Config, HelperEntry, HelperState};
 use crate::util::{git_global, run_capture, run_with_stdin};
 use anyhow::{bail, Result};
 use std::process::Command;
@@ -37,14 +37,46 @@ fn all(scope: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `credential.<url>.helper` entries in global config. They are evaluated for that URL and
-/// can override our host-independent helper, so the user needs to know.
-pub fn url_scoped_helpers() -> Vec<String> {
-    let (_, out) = git_global(&["--get-regexp", r"^credential\..+\.helper$"])
-        .unwrap_or((false, String::new()));
+/// All `credential[.<url>].helper` entries of one config scope, in file order.
+fn entries(scope: &str) -> Vec<HelperEntry> {
+    let mut c = Command::new("git");
+    c.args([
+        "config",
+        scope,
+        "--get-regexp",
+        r"^credential(\..+)?\.helper$",
+    ]);
+    let out = run_capture(&mut c).map(|(_, o, _)| o).unwrap_or_default();
     out.lines()
-        .map(|l| l.split_whitespace().next().unwrap_or("").to_string())
-        .filter(|k| !k.is_empty())
+        .filter_map(|l| {
+            let (key, val) = l.split_once(' ').unwrap_or((l, ""));
+            let inner = key.strip_prefix("credential.")?;
+            let scope = if inner == "helper" {
+                None
+            } else {
+                Some(inner.strip_suffix(".helper")?.to_string())
+            };
+            Some(HelperEntry {
+                scope,
+                value: val.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// URL-scoped global helpers that come AFTER ours and therefore override it for that host.
+/// (Ones before ours are captured and delegated to, so they keep working.)
+pub fn url_scoped_helpers() -> Vec<String> {
+    let all = entries("--global");
+    let Some(i) = all
+        .iter()
+        .position(|e| e.scope.is_none() && is_ours(&e.value))
+    else {
+        return vec![];
+    };
+    all[i + 1..]
+        .iter()
+        .filter_map(|e| e.scope.as_ref().map(|s| format!("credential.{s}.helper")))
         .collect()
 }
 
@@ -59,6 +91,9 @@ pub fn install_helper(cfg: &mut Config) -> Result<(String, Vec<String>)> {
 
     let global = all("--global");
     if cfg.helper.is_none() || !global.iter().any(|h| is_ours(h)) {
+        let mut captured: Vec<HelperEntry> = entries("--system");
+        captured.extend(entries("--global"));
+        captured.retain(|e| !is_ours(&e.value));
         let mut fallbacks: Vec<String> = Vec::new();
         for h in all("--system").into_iter().chain(global.iter().cloned()) {
             if !h.is_empty() && !is_ours(&h) && !fallbacks.contains(&h) {
@@ -67,6 +102,7 @@ pub fn install_helper(cfg: &mut Config) -> Result<(String, Vec<String>)> {
         }
         let (had, val) = git_global(&["--get", "credential.useHttpPath"])?;
         cfg.helper = Some(HelperState {
+            entries: captured,
             fallbacks,
             original_global: global,
             use_http_path: had.then(|| val.trim().to_string()),
@@ -127,12 +163,51 @@ fn helper_command(h: &str, op: &str) -> String {
     }
 }
 
-/// Pass a credential request through to the helpers git-vault replaced. For `get`, the first
-/// helper that returns a password wins; `store`/`erase` go to all of them.
-pub fn delegate(fallbacks: &[String], op: &str, input: &str) -> Result<()> {
-    for h in fallbacks {
+/// Does a `credential.<scope>.helper` section apply to this request?
+fn scope_matches(scope: &str, proto: &str, host: &str, path: &str) -> bool {
+    let Some((sp, rest)) = scope.split_once("://") else {
+        return false;
+    };
+    let (shost, spath) = rest.split_once('/').unwrap_or((rest, ""));
+    sp == proto
+        && shost.eq_ignore_ascii_case(host)
+        && (spath.is_empty()
+            || path
+                .trim_start_matches('/')
+                .starts_with(spath.trim_end_matches('/')))
+}
+
+/// The helper list git would have used for this request had git-vault not been installed.
+fn effective(st: &HelperState, proto: &str, host: &str, path: &str) -> Vec<String> {
+    if st.entries.is_empty() {
+        return st.fallbacks.clone(); // state written by 0.2.0
+    }
+    let mut out: Vec<String> = Vec::new();
+    for e in &st.entries {
+        if let Some(s) = &e.scope {
+            if !scope_matches(s, proto, host, path) {
+                continue;
+            }
+        }
+        if e.value.is_empty() {
+            out.clear();
+        } else {
+            out.push(e.value.clone());
+        }
+    }
+    out
+}
+
+/// Pass a credential request through to the helpers git-vault replaced (scoped ones only for
+/// the URLs they were scoped to). For `get`, the first helper that returns a password wins;
+/// `store`/`erase` go to all of them.
+pub fn delegate(st: &HelperState, op: &str, input: &str) -> Result<()> {
+    let kv: std::collections::HashMap<&str, &str> =
+        input.lines().filter_map(|l| l.split_once('=')).collect();
+    let get = |k: &str| kv.get(k).copied().unwrap_or("");
+    for h in effective(st, get("protocol"), get("host"), get("path")) {
         let mut c = Command::new("sh");
-        c.arg("-c").arg(helper_command(h, op));
+        c.arg("-c").arg(helper_command(&h, op));
         let Ok((ok, out, _)) = run_with_stdin(&mut c, input) else {
             continue;
         };
@@ -142,4 +217,56 @@ pub fn delegate(fallbacks: &[String], op: &str, input: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn e(scope: Option<&str>, v: &str) -> HelperEntry {
+        HelperEntry {
+            scope: scope.map(str::to_string),
+            value: v.to_string(),
+        }
+    }
+
+    #[test]
+    fn scoped_helpers_apply_only_to_their_url_and_resets_clear() {
+        let st = HelperState {
+            entries: vec![
+                e(None, "osxkeychain"),
+                e(Some("https://github.com"), ""),
+                e(Some("https://github.com"), "!gh auth git-credential"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            effective(&st, "https", "github.com", "o/r"),
+            vec!["!gh auth git-credential"]
+        );
+        assert_eq!(
+            effective(&st, "https", "example.org", "o/r"),
+            vec!["osxkeychain"]
+        );
+        assert_eq!(
+            effective(&st, "http", "github.com", "o/r"),
+            vec!["osxkeychain"]
+        );
+    }
+
+    #[test]
+    fn scope_with_path_prefix() {
+        assert!(scope_matches(
+            "https://github.com/corp",
+            "https",
+            "github.com",
+            "corp/app.git"
+        ));
+        assert!(!scope_matches(
+            "https://github.com/corp",
+            "https",
+            "github.com",
+            "other/app.git"
+        ));
+    }
 }

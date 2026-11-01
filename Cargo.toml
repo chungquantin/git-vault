@@ -1,6 +1,6 @@
 [package]
 name = "git-vault"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Manage multiple git identities and credentials per command, aws-vault style"
 repository = "https://github.com/chungquantin/git-vault"

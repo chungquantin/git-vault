@@ -31,10 +31,23 @@ pub struct Rule {
     pub vault: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct HelperEntry {
+    /// URL scope of `credential.<url>.helper`, None for plain `credential.helper`.
+    pub scope: Option<String>,
+    /// Empty = reset the list so far.
+    pub value: String,
+}
+
 /// What `install-helper` changed, so `uninstall-helper` can restore it exactly and the
 /// credential helper can delegate to the helpers it replaced.
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub struct HelperState {
+    /// Every `credential[.<url>].helper` entry from system + global config, in order (ours excluded).
+    #[serde(default)]
+    pub entries: Vec<HelperEntry>,
+    /// Unscoped subset of `entries`; only used for state written by 0.2.0.
+    #[serde(default)]
     pub fallbacks: Vec<String>,
     pub original_global: Vec<String>,
     pub use_http_path: Option<String>,

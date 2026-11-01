@@ -646,7 +646,7 @@ fn credential(ctx: &Ctx, vault: Option<String>, op: &str) -> Result<()> {
     let Some(r) = select_vault(ctx, vault.as_deref(), &kv) else {
         if vault.is_none() {
             if let Some(h) = &ctx.cfg.helper {
-                shell::delegate(&h.fallbacks, op, &input)?;
+                shell::delegate(h, op, &input)?;
             }
         }
         return Ok(());

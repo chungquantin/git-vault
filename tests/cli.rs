@@ -353,11 +353,61 @@ fn install_helper_replaces_then_delegates_and_restores_exactly() {
 }
 
 #[test]
-fn install_helper_warns_about_url_scoped_helpers() {
+fn install_helper_keeps_gh_style_url_scoped_helper_working() {
+    // Exactly the layout `gh auth setup-git` writes. Regression: install-helper's reset used to
+    // wipe it, so github.com fell through to a username prompt.
     let e = Env::new();
+    e.script("fake-gh", r#"cat >/dev/null; [ "$2" = get ] && printf 'username=ghuser\npassword=gh-token\n'; exit 0"#);
+    let gh = e.path("bin/fake-gh");
     std::fs::write(
         e.path("gitconfig"),
-        "[credential \"https://github.com\"]\n\thelper =\n\thelper = !gh auth git-credential\n",
+        format!(
+            "[credential \"https://github.com\"]\n\thelper =\n\thelper = !{} auth\n",
+            gh.display()
+        ),
+    )
+    .unwrap();
+    let o = ok(&e.vault(&["install-helper"]));
+    assert!(
+        !o.contains("warning"),
+        "scoped helper before ours is captured, not a problem: {o}"
+    );
+
+    // no vault applies: github.com still answered by the gh helper, other hosts are not
+    let gh_req = "protocol=https\nhost=github.com\npath=architect-xyz/liquid.git\n\n";
+    let r = cred(&e, &[], gh_req);
+    assert!(
+        r.contains("password=gh-token"),
+        "gh helper must still answer: {r}"
+    );
+    assert_eq!(
+        cred(&e, &[], "protocol=https\nhost=gitlab.com\npath=a/b\n\n"),
+        ""
+    );
+
+    // a vault rule takes precedence for its repos; everything else still goes to gh
+    add(&e, "me", &["--email", "m@x"], "tok-me");
+    ok(&e.vault(&["rule", "add", "github.com/me/*", "--vault", "me"]));
+    assert!(cred(
+        &e,
+        &[],
+        "protocol=https\nhost=github.com\npath=me/app.git\n\n"
+    )
+    .contains("password=tok-me"));
+    assert!(cred(&e, &[], gh_req).contains("password=gh-token"));
+
+    ok(&e.vault(&["uninstall-helper"]));
+    let cfg = std::fs::read_to_string(e.path("gitconfig")).unwrap();
+    assert!(cfg.contains("auth") && !cfg.contains("git-vault"), "{cfg}");
+}
+
+#[test]
+fn install_helper_warns_about_url_scoped_helpers_that_override_it() {
+    let e = Env::new();
+    // scoped section comes AFTER the unscoped one that install-helper rewrites -> it wins for that host
+    std::fs::write(
+        e.path("gitconfig"),
+        "[credential]\n\tuseHttpPath = false\n\thelper = x\n[credential \"https://github.com\"]\n\thelper = !gh auth git-credential\n",
     )
     .unwrap();
     let o = ok(&e.vault(&["install-helper"]));
